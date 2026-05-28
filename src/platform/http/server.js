@@ -196,22 +196,33 @@ export class HttpApiServer {
           res.flushHeaders();
 
           let lastSent = '';
+          let htmlMode = false;
           const result = await platform.waitForResponse({ timeout }, (text, delta) => {
+            if (text.startsWith('__HTML__')) {
+              htmlMode = true;
+              text = text.slice(7);
+            }
             if (text !== lastSent) {
               lastSent = text;
-              const payload = JSON.stringify({ text, delta, complete: false });
+              const payload = JSON.stringify({ text, delta, html: htmlMode, complete: false });
               res.write(`data: ${payload}\n\n`);
             }
           });
 
-          const finalPayload = JSON.stringify({ text: result.text, complete: true, length: result.text.length });
+          const resultIsHtml = htmlMode || result.text.startsWith('__HTML__');
+          const cleanText = resultIsHtml ? result.text.replace('__HTML__', '') : result.text;
+          const finalPayload = JSON.stringify({
+            text: cleanText, html: resultIsHtml, complete: true, length: cleanText.length,
+          });
           res.write(`data: ${finalPayload}\n\n`);
           res.end();
         } else {
           // 非流式：直接返回完整结果
           const result = await platform.waitForResponse({ timeout });
+          const isHtml = result.text.startsWith('__HTML__');
           this._json(res, 200, {
-            text: result.text,
+            text: isHtml ? result.text.slice(7) : result.text,
+            html: isHtml,
             complete: result.complete,
             length: result.text.length,
           });

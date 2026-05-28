@@ -165,39 +165,47 @@ export class ZhipuChatPlatform extends BaseChatPlatform {
     return super._isStreaming();
   }
 
-  /**
-   * 调试：记录 _getResponseText 返回空的原因
-   */
-  async _getResponseText() {
+  async _getResponseHtml() {
     if (!this.page) return '';
-
-    // 1. 获取思考过程
-    let thinkingText = '';
-    const thinkingSelectors = [
-      '.advance-thinking .thinking-content .markdown-body',
-      '.advance-thinking .thinking-content',
-      '.text-advance-thinking-content .markdown-body',
-      '.text-advance-thinking-content',
-      '.thinking-item .markdown-body',
+    const selectors = [
+      '.answer:last-of-type .answer-content-wrap:not(.text-advance-thinking-content) .markdown-body',
+      '.answer:last-of-type .answer-content-wrap:not(.text-advance-thinking-content)',
+      '.answer:last-of-type',
     ];
-    for (const sel of thinkingSelectors) {
+    for (const sel of selectors) {
       try {
         const el = this.page.locator(sel).last();
         const count = await el.count().catch(() => 0);
         if (count > 0) {
-          const text = await el.innerText({ timeout: 2000 }).catch(() => '');
-          if (text.trim().length > 0) { thinkingText = text.trim(); break; }
+          const html = await el.innerHTML({ timeout: 2000 }).catch(() => '');
+          if (html.trim().length > 0) return html;
         }
       } catch { /* try next */ }
     }
+    return '';
+  }
 
-    // 2. 获取最终回复
+  /**
+   * 直接提取页面原始 HTML。
+   */
+  async _getResponseText() {
+    if (!this.page) return '';
+    const outer = this.page.locator('.conversation-inner, .conversation-list, .answer:last-of-type').first();
+    try {
+      const html = await outer.innerHTML({ timeout: 2000 }).catch(() => '');
+      if (html && html.length > 200) {
+        return `__HTML__${html}`;
+      }
+    } catch { /* fall through */ }
+    // fallback: 逐级获取
+    const answerHtml = await this._getResponseHtml();
+    if (answerHtml) return `__HTML__${answerHtml}`;
+    // 最后兜底: 文本
     let answerText = '';
     const answerSelectors = [
       '.answer:last-of-type .answer-content-wrap:not(.text-advance-thinking-content) .markdown-body',
       '.answer:last-of-type .answer-content-wrap:not(.text-advance-thinking-content)',
       '.answer:last-of-type .markdown-body',
-      '[id^="row-answer"]:last-of-type [class*="markdown"]',
     ];
     for (const sel of answerSelectors) {
       try {
@@ -209,29 +217,6 @@ export class ZhipuChatPlatform extends BaseChatPlatform {
         }
       } catch { /* try next */ }
     }
-
-    // 3. 诊断：内容为空时记录当前页面上能找到什么元素
-    if (!thinkingText && !answerText) {
-      try {
-        const bodyText = await this.page.evaluate(() => document.body.innerText.substring(0, 200)).catch(() => '');
-        console.error(`[zhipu] 页面文本预览: "${bodyText.replace(/\n/g, ' ').trim().substring(0, 100)}..."`);
-        // 检查关键容器是否存在
-        const hasAnswer = await this.page.locator('.answer').count().catch(() => 0);
-        const hasContent = await this.page.locator('.answer-content-wrap').count().catch(() => 0);
-        const hasMarkdown = await this.page.locator('.markdown-body').count().catch(() => 0);
-        console.error(`[zhipu] DOM: .answer=${hasAnswer}, .answer-content-wrap=${hasContent}, .markdown-body=${hasMarkdown}`);
-      } catch { /* ignore */ }
-    }
-
-    // 4. 获取引用信源
-    const sources = await this._getCitedSources();
-
-    // 5. 合并
-    const parts = [];
-    if (thinkingText) parts.push(`【思考过程】\n${thinkingText}`);
-    if (answerText) parts.push(`【回复】\n${answerText}`);
-    if (sources) parts.push(sources);
-
-    return parts.join('\n\n');
+    return answerText;
   }
 }

@@ -13,8 +13,9 @@ export default function ChatStep({ platform, onBack, onLogout }: ChatStepProps) 
   const [prompt, setPrompt] = useState('');
   const [sending, setSending] = useState(false);
   const [streamingText, setStreamingText] = useState<string>('');
+  const [streamingHtml, setStreamingHtml] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [history, setHistory] = useState<{ role: 'user' | 'ai'; text: string }[]>([]);
+  const [history, setHistory] = useState<{ role: 'user' | 'ai'; text: string; html?: boolean }[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
   const listEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -42,12 +43,14 @@ export default function ChatStep({ platform, onBack, onLogout }: ChatStepProps) 
     setSending(true);
     setError(null);
     setStreamingText('');
+    setStreamingHtml(false);
     setHistory(h => [...h, { role: 'user', text }]);
     setPrompt('');
 
     const controller = new AbortController();
     abortRef.current = controller;
     let accumulatedText = '';
+    let isHtmlContent = false;
 
     try {
       const res = await fetch(`/api/${platform}/chat?stream=true`, {
@@ -90,12 +93,17 @@ export default function ChatStep({ platform, onBack, onLogout }: ChatStepProps) 
               const data = JSON.parse(line.slice(6));
               if (data.error) {
                 setError(data.error);
-              } else if (data.complete) {
-                accumulatedText = data.text || accumulatedText;
-                setStreamingText(accumulatedText);
-              } else if (data.text) {
-                accumulatedText = data.text;
-                setStreamingText(accumulatedText);
+              } else {
+                if (data.html) isHtmlContent = true;
+                if (data.complete) {
+                  accumulatedText = data.text || accumulatedText;
+                  setStreamingText(accumulatedText);
+                  setStreamingHtml(isHtmlContent);
+                } else if (data.text) {
+                  accumulatedText = data.text;
+                  setStreamingText(accumulatedText);
+                  setStreamingHtml(isHtmlContent);
+                }
               }
             } catch { /* skip malformed */ }
           }
@@ -114,9 +122,10 @@ export default function ChatStep({ platform, onBack, onLogout }: ChatStepProps) 
 
       // 添加到历史
       if (accumulatedText) {
-        setHistory(h => [...h, { role: 'ai', text: accumulatedText }]);
+        setHistory(h => [...h, { role: 'ai', text: accumulatedText, html: isHtmlContent }]);
       }
       setStreamingText('');
+      setStreamingHtml(false);
     } catch (err: unknown) {
       if ((err as Error)?.name === 'AbortError') return;
       const msg = err instanceof Error ? err.message : '网络错误';
@@ -176,10 +185,16 @@ export default function ChatStep({ platform, onBack, onLogout }: ChatStepProps) 
               background: msg.role === 'user' ? 'var(--color-primary)' : 'var(--bg-card)',
               color: msg.role === 'user' ? '#fff' : 'var(--text-primary)',
               fontSize: 'var(--fs-body)', lineHeight: 1.6,
-              whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+              whiteSpace: msg.html ? 'normal' : 'pre-wrap',
+              wordBreak: 'break-word',
               boxShadow: 'var(--shadow-card)',
+              overflow: 'auto',
             }}>
-              {msg.text}
+              {msg.html ? (
+                <div dangerouslySetInnerHTML={{ __html: msg.text }} />
+              ) : (
+                msg.text
+              )}
             </div>
           </div>
         ))}
@@ -192,9 +207,15 @@ export default function ChatStep({ platform, onBack, onLogout }: ChatStepProps) 
               background: 'var(--bg-card)', color: 'var(--text-primary)',
               boxShadow: 'var(--shadow-card)',
               fontSize: 'var(--fs-body)', lineHeight: 1.6,
-              whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+              whiteSpace: streamingHtml ? 'normal' : 'pre-wrap',
+              wordBreak: 'break-word',
+              overflow: 'auto',
             }}>
-              {streamingText || <DotLoading color="primary" />}
+              {streamingText ? (
+                streamingHtml ? <div dangerouslySetInnerHTML={{ __html: streamingText }} /> : streamingText
+              ) : (
+                <DotLoading color="primary" />
+              )}
             </div>
           </div>
         )}
