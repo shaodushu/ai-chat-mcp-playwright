@@ -67,11 +67,9 @@ export class BrowserManager {
   async launchUserContext(userId, stateFile) {
     const userDataDir = path.join(this.storageDir, userId);
 
-    // 首次启动时清理旧数据；有 storageState 保留登录态
-    if (!fs.existsSync(stateFile)) {
-      if (fs.existsSync(userDataDir)) {
-        fs.rmSync(userDataDir, { recursive: true, force: true });
-      }
+    // 每次启动都清理旧数据，保证纯净浏览器
+    if (fs.existsSync(userDataDir)) {
+      fs.rmSync(userDataDir, { recursive: true, force: true });
     }
 
     ensureDir(userDataDir);
