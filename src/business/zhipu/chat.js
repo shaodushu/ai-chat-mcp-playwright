@@ -165,12 +165,15 @@ export class ZhipuChatPlatform extends BaseChatPlatform {
     return super._isStreaming();
   }
 
-  async _getResponseHtml() {
+  /**
+   * 提取 AI 回复区域的 markdown 渲染 HTML。
+   */
+  async _getResponseText() {
     if (!this.page) return '';
     const selectors = [
       '.answer:last-of-type .answer-content-wrap:not(.text-advance-thinking-content) .markdown-body',
       '.answer:last-of-type .answer-content-wrap:not(.text-advance-thinking-content)',
-      '.answer:last-of-type',
+      '.answer:last-of-type .markdown-body',
     ];
     for (const sel of selectors) {
       try {
@@ -178,45 +181,10 @@ export class ZhipuChatPlatform extends BaseChatPlatform {
         const count = await el.count().catch(() => 0);
         if (count > 0) {
           const html = await el.innerHTML({ timeout: 2000 }).catch(() => '');
-          if (html.trim().length > 0) return html;
+          if (html.trim().length > 0) return `__HTML__${html}`;
         }
       } catch { /* try next */ }
     }
     return '';
-  }
-
-  /**
-   * 直接提取页面原始 HTML。
-   */
-  async _getResponseText() {
-    if (!this.page) return '';
-    const outer = this.page.locator('.conversation-inner, .conversation-list, .answer:last-of-type').first();
-    try {
-      const html = await outer.innerHTML({ timeout: 2000 }).catch(() => '');
-      if (html && html.length > 200) {
-        return `__HTML__${html}`;
-      }
-    } catch { /* fall through */ }
-    // fallback: 逐级获取
-    const answerHtml = await this._getResponseHtml();
-    if (answerHtml) return `__HTML__${answerHtml}`;
-    // 最后兜底: 文本
-    let answerText = '';
-    const answerSelectors = [
-      '.answer:last-of-type .answer-content-wrap:not(.text-advance-thinking-content) .markdown-body',
-      '.answer:last-of-type .answer-content-wrap:not(.text-advance-thinking-content)',
-      '.answer:last-of-type .markdown-body',
-    ];
-    for (const sel of answerSelectors) {
-      try {
-        const el = this.page.locator(sel).last();
-        const count = await el.count().catch(() => 0);
-        if (count > 0) {
-          const text = await el.innerText({ timeout: 2000 }).catch(() => '');
-          if (text.trim().length > 0) { answerText = text.trim(); break; }
-        }
-      } catch { /* try next */ }
-    }
-    return answerText;
   }
 }

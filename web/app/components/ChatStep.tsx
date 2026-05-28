@@ -1,7 +1,39 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Button, TextArea, SpinLoading, DotLoading } from 'antd-mobile';
+import { Button, TextArea, DotLoading } from 'antd-mobile';
+
+// markdown 渲染 HTML 基础样式
+const mdStyles = {
+  container: {
+    fontSize: 'var(--fs-body)', lineHeight: 1.7, color: 'var(--text-primary)',
+  },
+  p: { margin: '0.5em 0' },
+  h1: { fontSize: '1.3em', fontWeight: 700, margin: '0.8em 0 0.4em' },
+  h2: { fontSize: '1.15em', fontWeight: 700, margin: '0.7em 0 0.3em' },
+  h3: { fontSize: '1.05em', fontWeight: 600, margin: '0.6em 0 0.3em' },
+  ul: { paddingLeft: '1.2em', margin: '0.4em 0' },
+  ol: { paddingLeft: '1.2em', margin: '0.4em 0' },
+  li: { margin: '0.2em 0' },
+  pre: {
+    background: 'var(--gray-1)', padding: 'var(--sp-md)', borderRadius: 'var(--radius-sm)',
+    overflowX: 'auto', fontSize: 'var(--fs-caption)', lineHeight: 1.5, margin: '0.5em 0',
+  },
+  code: {
+    background: 'var(--gray-1)', padding: '1px 4px', borderRadius: 3,
+    fontSize: '0.9em', fontFamily: 'var(--font-mono)',
+  },
+  blockquote: {
+    borderLeft: '3px solid var(--color-primary)', paddingLeft: 'var(--sp-md)',
+    margin: '0.5em 0', color: 'var(--text-secondary)',
+  },
+  table: { borderCollapse: 'collapse' as const, width: '100%', margin: '0.5em 0' },
+  th: { border: '1px solid var(--gray-3)', padding: '6px 10px', background: 'var(--gray-1)', fontWeight: 600, textAlign: 'left' as const },
+  td: { border: '1px solid var(--gray-3)', padding: '6px 10px' },
+  img: { maxWidth: '100%', borderRadius: 'var(--radius-sm)' },
+  a: { color: 'var(--color-primary)', textDecoration: 'underline' },
+  hr: { border: 'none', borderTop: '1px solid var(--gray-3)', margin: '1em 0' },
+};
 
 interface ChatStepProps {
   platform: string;
@@ -191,7 +223,7 @@ export default function ChatStep({ platform, onBack, onLogout }: ChatStepProps) 
               overflow: 'auto',
             }}>
               {msg.html ? (
-                <div dangerouslySetInnerHTML={{ __html: msg.text }} />
+                <div className="ai-html-content" dangerouslySetInnerHTML={{ __html: msg.text }} />
               ) : (
                 msg.text
               )}
@@ -212,7 +244,7 @@ export default function ChatStep({ platform, onBack, onLogout }: ChatStepProps) 
               overflow: 'auto',
             }}>
               {streamingText ? (
-                streamingHtml ? <div dangerouslySetInnerHTML={{ __html: streamingText }} /> : streamingText
+                streamingHtml ? <div className="ai-html-content" dangerouslySetInnerHTML={{ __html: streamingText }} /> : streamingText
               ) : (
                 <DotLoading color="primary" />
               )}
@@ -232,6 +264,24 @@ export default function ChatStep({ platform, onBack, onLogout }: ChatStepProps) 
 
         <div ref={listEndRef} />
       </div>
+      <style>{`
+.ai-html-content { font-size: var(--fs-body); line-height: 1.7; color: var(--text-primary); }
+.ai-html-content p { margin: 0.5em 0; }
+.ai-html-content h1 { font-size: 1.3em; font-weight: 700; margin: 0.8em 0 0.4em; }
+.ai-html-content h2 { font-size: 1.15em; font-weight: 700; margin: 0.7em 0 0.3em; }
+.ai-html-content h3 { font-size: 1.05em; font-weight: 600; margin: 0.6em 0 0.3em; }
+.ai-html-content ul, .ai-html-content ol { padding-left: 1.2em; margin: 0.4em 0; }
+.ai-html-content li { margin: 0.2em 0; }
+.ai-html-content pre { background: var(--gray-1); padding: var(--sp-md); border-radius: var(--radius-sm); overflow-x: auto; font-size: var(--fs-caption); line-height: 1.5; margin: 0.5em 0; }
+.ai-html-content code { background: var(--gray-1); padding: 1px 4px; border-radius: 3px; font-size: 0.9em; font-family: var(--font-mono); }
+.ai-html-content blockquote { border-left: 3px solid var(--color-primary); padding-left: var(--sp-md); margin: 0.5em 0; color: var(--text-secondary); }
+.ai-html-content table { border-collapse: collapse; width: 100%; margin: 0.5em 0; }
+.ai-html-content th, .ai-html-content td { border: 1px solid var(--gray-3); padding: 6px 10px; }
+.ai-html-content th { background: var(--gray-1); font-weight: 600; text-align: left; }
+.ai-html-content img { max-width: 100%; border-radius: var(--radius-sm); }
+.ai-html-content a { color: var(--color-primary); text-decoration: underline; }
+.ai-html-content hr { border: none; border-top: 1px solid var(--gray-3); margin: 1em 0; }
+`}</style>
 
       {/* Input */}
       <div style={{
