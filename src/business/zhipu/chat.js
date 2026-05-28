@@ -5,7 +5,7 @@
  * 使用通用选择器适配。
  */
 import { BaseChatPlatform } from '../base.js';
-import { locateElement, isElementVisible } from '../../platform/utils/dom.js';
+import { locateElement, locateAllElements, isElementVisible } from '../../platform/utils/dom.js';
 import { zhipuSelectors, zhipuTiming, ZHIPU_URL } from './config.js';
 
 export class ZhipuChatPlatform extends BaseChatPlatform {
@@ -50,10 +50,54 @@ export class ZhipuChatPlatform extends BaseChatPlatform {
     } catch { /* ignore */ }
   }
 
+  async _toggleWebSearch() {
+    if (!this.page || !this.selectors.webSearchButton) return;
+    try {
+      const webBtn = await locateElement(this.page, this.selectors.webSearchButton);
+      if (!webBtn) return;
+      // 检查是否已选中（有 selected 类名）
+      const isSelected = await webBtn.evaluate(el =>
+        el.classList.contains('selected') ||
+        el.querySelector('.selected') !== null ||
+        el.closest('.selected') !== null
+      ).catch(() => false);
+      if (!isSelected) {
+        await webBtn.click();
+        await new Promise(r => setTimeout(r, 800));
+        console.error('[zhipu] 已开启联网搜索');
+      }
+    } catch { /* ignore */ }
+  }
+
+  async _getCitedSources() {
+    if (!this.page || !this.selectors.citedSources) return '';
+    try {
+      const sources = await locateAllElements(this.page, this.selectors.citedSources);
+      if (!sources || sources.length === 0) return '';
+
+      const lines = [];
+      for (const el of sources) {
+        const text = await el.innerText().catch(() => '');
+        const href = await el.getAttribute('href').catch(() => '');
+        if (text.trim()) {
+          lines.push(href ? `${text} (${href})` : text);
+        }
+      }
+      if (lines.length > 0) {
+        console.error(`[zhipu] 提取到 ${lines.length} 条引用信源`);
+        return `\n\n【引用信源】\n${lines.join('\n')}`;
+      }
+    } catch { /* ignore */ }
+    return '';
+  }
+
   async sendPrompt(prompt) {
     if (!this.page) throw new Error('浏览器未启动');
 
     await this._closeDialog();
+
+    // 开启联网搜索
+    await this._toggleWebSearch();
 
     const input = await locateElement(this.page, this.selectors.chatInput);
     if (!input) throw new Error('找不到聊天输入框，智谱页面结构可能已变化');
@@ -179,10 +223,14 @@ export class ZhipuChatPlatform extends BaseChatPlatform {
       } catch { /* ignore */ }
     }
 
-    // 4. 合并
+    // 4. 获取引用信源
+    const sources = await this._getCitedSources();
+
+    // 5. 合并
     const parts = [];
     if (thinkingText) parts.push(`【思考过程】\n${thinkingText}`);
     if (answerText) parts.push(`【回复】\n${answerText}`);
+    if (sources) parts.push(sources);
 
     return parts.join('\n\n');
   }

@@ -66,6 +66,27 @@ export const zhipuSelectors = {
       '[class*="pause"]',
     ],
   },
+  /** 联网搜索按钮 */
+  webSearchButton: {
+    fallback: [
+      '.mode-button:has-text("联网")',
+      'div:has-text("联网") svg',
+      '[class*="mode-button"]:has-text("联网")',
+      'div[class*="mode"] span:has-text("联网")',
+    ],
+  },
+  /** 引用信源 */
+  citedSources: {
+    fallback: [
+      '[class*="source"]',
+      '[class*="reference"]',
+      '[class*="citation"]',
+      '[class*="ref-link"]',
+      'a[href*="http"][class*="source"]',
+      '.answer-content-wrap [class*="link"]',
+      '.answer-content-wrap a[href]',
+    ],
+  },
   streamingIndicator: {
     fallback: [
       '.advance-thinking:not(.collapse)',
