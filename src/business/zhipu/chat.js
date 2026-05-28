@@ -144,58 +144,12 @@ export class ZhipuChatPlatform extends BaseChatPlatform {
   }
 
   /**
-   * 提取 AI 回复区域的内容 + 引用信源，将 citation 转换为超链接。
+   * 提取 AI 回复 HTML，将 citation 标记转换为可点击超链接。
    */
   async _getResponseText() {
     if (!this.page) return '';
 
-    // 在页面中克隆 DOM，将 .source-item-num[data-url] 转换为 <a> 链接，返回 HTML
-    const result = await this.page.evaluate(() => {
-      // 1. 取答案内容
-      const answerEl = document.querySelector(
-        '.answer:last-of-type .answer-content-wrap:not(.text-advance-thinking-content)'
-      ) || document.querySelector('.answer:last-of-type .markdown-body');
-      if (!answerEl) return null;
-
-      const clone = answerEl.cloneNode(true);
-      // 转换引用标记为可点击链接
-      clone.querySelectorAll('.source-item-num[data-url]').forEach(span => {
-        const url = span.getAttribute('data-url');
-        if (!url) return;
-        const a = document.createElement('a');
-        a.href = url;
-        a.target = '_blank';
-        a.rel = 'noopener noreferrer';
-        a.textContent = span.textContent || url;
-        a.style.textDecoration = 'underline';
-        span.parentNode.replaceChild(a, span);
-      });
-
-      const contentHtml = clone.innerHTML;
-
-      // 2. 取引用信源
-      const sourcesEl = document.querySelector('.sources-tab-container.sources-tab-text-container');
-      const sourcesHtml = sourcesEl ? sourcesEl.innerHTML : '';
-
-      const container = document.createElement('div');
-      const contentDiv = document.createElement('div');
-      contentDiv.className = 'ai-answer-content';
-      contentDiv.innerHTML = contentHtml;
-      container.appendChild(contentDiv);
-
-      if (sourcesHtml) {
-        const sourcesDiv = document.createElement('div');
-        sourcesDiv.className = 'ai-sources';
-        sourcesDiv.innerHTML = sourcesHtml;
-        container.appendChild(sourcesDiv);
-      }
-
-      return container.outerHTML;
-    });
-
-    if (result && result.length > 100) return `__HTML__${result}`;
-
-    // fallback: 原生 Playwright 选择器
+    // 1. 用 Playwright locator 取答案 HTML（可靠）
     let html = '';
     const selectors = [
       '.answer:last-of-type .answer-content-wrap:not(.text-advance-thinking-content)',
@@ -211,6 +165,29 @@ export class ZhipuChatPlatform extends BaseChatPlatform {
       } catch { /* try next */ }
     }
     if (!html) return '';
-    return `__HTML__<div class="ai-answer-content">${html}</div>`;
+
+    // 2. 转换 .source-item-num[data-url] 为可点击链接
+    html = html.replace(
+      /<span[^>]*?class="[^"]*source-item-num[^"]*"[^>]*?data-url="([^"]+)"[^>]*>.*?<\/span>/gis,
+      (match, url) => {
+        const text = match.replace(/<[^>]+>/g, '').trim() || url;
+        return `<a href="${url}" target="_blank" rel="noopener noreferrer" style="text-decoration:underline;color:var(--color-primary)">${text}</a>`;
+      }
+    );
+
+    // 3. 取引用信源
+    let sourcesHtml = '';
+    try {
+      const sourcesEl = this.page.locator('.sources-tab-container.sources-tab-text-container').last();
+      if (await sourcesEl.count().then(c => c > 0).catch(() => false)) {
+        sourcesHtml = await sourcesEl.innerHTML({ timeout: 2000 }).catch(() => '');
+      }
+    } catch { /* ignore */ }
+
+    const result = sourcesHtml
+      ? `<div class="ai-answer-content">${html}</div><div class="ai-sources">${sourcesHtml}</div>`
+      : `<div class="ai-answer-content">${html}</div>`;
+
+    return `__HTML__${result}`;
   }
 }
