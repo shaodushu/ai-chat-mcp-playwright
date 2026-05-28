@@ -166,25 +166,56 @@ export class ZhipuChatPlatform extends BaseChatPlatform {
   }
 
   /**
-   * 提取 AI 回复区域的 markdown 渲染 HTML。
+   * 提取 AI 回复区域的内容 + 引用信源。
+   * DOM 结构：
+   *   .answer-content-wrap:not(.text-advance-thinking-content) → markdown 渲染 HTML
+   *   .sources-tab-container.sources-tab-text-container → 引用信源列表
    */
   async _getResponseText() {
     if (!this.page) return '';
-    const selectors = [
-      '.answer:last-of-type .answer-content-wrap:not(.text-advance-thinking-content) .markdown-body',
+    let html = '';
+
+    // 1. 取 aiResponse 内容
+    const contentSelectors = [
+      '.answer:last-of-type > .panel > .flex > .answer-content.flex1 > .code-box.flex1 > .answer-content-wrap:not(.text-advance-thinking-content)',
       '.answer:last-of-type .answer-content-wrap:not(.text-advance-thinking-content)',
-      '.answer:last-of-type .markdown-body',
     ];
-    for (const sel of selectors) {
+    for (const sel of contentSelectors) {
       try {
         const el = this.page.locator(sel).last();
         const count = await el.count().catch(() => 0);
         if (count > 0) {
-          const html = await el.innerHTML({ timeout: 2000 }).catch(() => '');
-          if (html.trim().length > 0) return `__HTML__${html}`;
+          const inner = await el.innerHTML({ timeout: 2000 }).catch(() => '');
+          if (inner && inner.trim().length > 100) { html = inner; break; }
         }
       } catch { /* try next */ }
     }
-    return '';
+
+    if (!html) {
+      // fallback: 直接取 markdown-body
+      try {
+        const el = this.page.locator('.answer:last-of-type .markdown-body').last();
+        const inner = await el.innerHTML({ timeout: 2000 }).catch(() => '');
+        if (inner && inner.trim().length > 0) html = inner;
+      } catch { /* ignore */ }
+    }
+
+    if (!html) return '';
+
+    // 2. 取引用信源（如果有）
+    let sourcesHtml = '';
+    try {
+      const sourcesEl = this.page.locator('.sources-tab-container.sources-tab-text-container').last();
+      const count = await sourcesEl.count().catch(() => 0);
+      if (count > 0) {
+        sourcesHtml = await sourcesEl.innerHTML({ timeout: 2000 }).catch(() => '');
+      }
+    } catch { /* ignore */ }
+
+    const result = sourcesHtml
+      ? `<div class="ai-answer-content">${html}</div><div class="ai-sources">${sourcesHtml}</div>`
+      : `<div class="ai-answer-content">${html}</div>`;
+
+    return `__HTML__${result}`;
   }
 }

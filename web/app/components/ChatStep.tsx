@@ -281,6 +281,11 @@ export default function ChatStep({ platform, onBack, onLogout }: ChatStepProps) 
 .ai-html-content img { max-width: 100%; border-radius: var(--radius-sm); }
 .ai-html-content a { color: var(--color-primary); text-decoration: underline; }
 .ai-html-content hr { border: none; border-top: 1px solid var(--gray-3); margin: 1em 0; }
+.ai-html-content .ai-answer-content { }
+.ai-html-content .ai-sources { margin-top: var(--sp-lg); padding-top: var(--sp-md); border-top: 1px solid var(--gray-3); }
+.ai-html-content .source-icon-list { display: flex; gap: 4px; align-items: center; margin-bottom: var(--sp-sm); }
+.ai-html-content .source-icon-list img { width: 20px; height: 20px; border-radius: 2px; }
+.ai-html-content .source-text { font-size: var(--fs-caption); color: var(--text-secondary); }
 `}</style>
 
       {/* Input */}
