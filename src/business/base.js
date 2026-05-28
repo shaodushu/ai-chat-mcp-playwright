@@ -145,11 +145,12 @@ export class BaseChatPlatform {
   /**
    * 等待 AI 回复完成（基于文本稳定性的流式检测）。
    * @param {{ timeout?: number, pollInterval?: number, stabilityThreshold?: number }} opts
+   * @param {Function} [onChunk] - 可选，每次轮询有新文本时回调 (currentText, delta)
    * @returns {Promise<{ text: string, complete: boolean }>}
    */
-  async waitForResponse(opts = {}) {
+  async waitForResponse(opts = {}, onChunk = null) {
     const timeout = opts.timeout || this.timing.responseTimeout || 180000;
-    const pollInterval = opts.pollInterval || this.timing.pollInterval || 1000;
+    const pollInterval = onChunk ? 500 : (opts.pollInterval || this.timing.pollInterval || 1000);
     const stabilityThreshold = opts.stabilityThreshold || this.timing.stabilityThreshold || 3;
     const firstTokenTimeout = this.timing.firstTokenTimeout || 30000;
     const start = Date.now();
@@ -166,11 +167,11 @@ export class BaseChatPlatform {
       if (lastText.length > 0) {
         responseStarted = true;
         console.error(`[${this.id}] 收到首个响应内容 (${lastText.length} 字符)`);
+        if (onChunk) onChunk(lastText, lastText);
         break;
       }
       if (isStreaming) {
         streamingIterations++;
-        // 持续检测到流式但无内容 → 继续等待最多 firstTokenTimeout
         if (streamingIterations > 10) {
           responseStarted = true;
           console.error(`[${this.id}] 检测到流式输出，继续等待内容`);
@@ -188,9 +189,10 @@ export class BaseChatPlatform {
       throw new Error(`AI 在 ${firstTokenTimeout / 1000}s 内未开始回复`);
     }
 
-    // 阶段二：文本稳定性检测
+    // 阶段二：文本稳定性检测（流式推送）
     let stableCount = 0;
     let emptyPollCount = 0;
+    let lastSent = lastText;
 
     while (Date.now() - start < timeout) {
       await new Promise(r => setTimeout(r, pollInterval));
@@ -201,7 +203,6 @@ export class BaseChatPlatform {
       if (currentText.length === 0) {
         emptyPollCount++;
         if (emptyPollCount > 30) {
-          // 连续30次内容为空 → 可能页面结构有变，返回空结果避免无限等待
           console.error(`[${this.id}] 警告: 连续30次轮询内容为空，强制结束`);
           return { text: '', complete: false, error: 'content_empty' };
         }
@@ -212,6 +213,12 @@ export class BaseChatPlatform {
       if (currentText !== lastText) {
         stableCount = 0;
         lastText = currentText;
+        // 流式推送新增内容
+        if (onChunk && currentText.length > lastSent.length) {
+          const delta = currentText.slice(lastSent.length);
+          lastSent = currentText;
+          onChunk(currentText, delta);
+        }
       } else if (!isStreaming && currentText.length > 0) {
         stableCount++;
       }
@@ -225,7 +232,7 @@ export class BaseChatPlatform {
     // 阶段三：超时 — 返回部分文本
     const partial = await this._getResponseText();
     console.error(`[${this.id}] 回复超时(${timeout / 1000}s)，返回部分文本 (${partial.length} 字符)`);
-    return { text: partial || '(内容获取失败，请检查页面是否正确加载)', complete: false };
+    return { text: partial || '(内容获取失败)', complete: false };
   }
 
   /**

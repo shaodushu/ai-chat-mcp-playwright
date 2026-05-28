@@ -165,6 +165,8 @@ export class HttpApiServer {
       return;
     }
 
+    const isStream = req._query?.stream === 'true' || body.stream === true;
+
     await platform.withLock(async () => {
       if (!platform._launched) {
         await platform.launch();
@@ -184,15 +186,44 @@ export class HttpApiServer {
 
       try {
         await platform.sendPrompt(prompt);
-        const result = await platform.waitForResponse({ timeout });
-        this._json(res, 200, {
-          text: result.text,
-          complete: result.complete,
-          length: result.text.length,
-        });
+
+        if (isStream) {
+          // 流式模式：SSE
+          res.setHeader('Content-Type', 'text/event-stream');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('Connection', 'keep-alive');
+          res.writeHead(200);
+          res.flushHeaders();
+
+          let lastSent = '';
+          const result = await platform.waitForResponse({ timeout }, (text, delta) => {
+            if (text !== lastSent) {
+              lastSent = text;
+              const payload = JSON.stringify({ text, delta, complete: false });
+              res.write(`data: ${payload}\n\n`);
+            }
+          });
+
+          const finalPayload = JSON.stringify({ text: result.text, complete: true, length: result.text.length });
+          res.write(`data: ${finalPayload}\n\n`);
+          res.end();
+        } else {
+          // 非流式：直接返回完整结果
+          const result = await platform.waitForResponse({ timeout });
+          this._json(res, 200, {
+            text: result.text,
+            complete: result.complete,
+            length: result.text.length,
+          });
+        }
       } catch (err) {
         console.error(`[HTTP] chat/${params.platform} 错误:`, err.message, err.stack?.split('\n').slice(0, 3).join(' '));
-        this._json(res, 500, { error: err.message });
+        if (isStream) {
+          res.write(`data: ${JSON.stringify({ error: err.message, complete: true })}\n\n`);
+          res.end();
+        } else {
+          this._json(res, 500, { error: err.message });
+        }
       }
     });
   }

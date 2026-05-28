@@ -12,12 +12,12 @@ interface ChatStepProps {
 export default function ChatStep({ platform, onBack, onLogout }: ChatStepProps) {
   const [prompt, setPrompt] = useState('');
   const [sending, setSending] = useState(false);
-  const [response, setResponse] = useState<string | null>(null);
-  const [complete, setComplete] = useState(true);
+  const [streamingText, setStreamingText] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<{ role: 'user' | 'ai'; text: string }[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
   const listEndRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const init = async () => {
@@ -33,7 +33,7 @@ export default function ChatStep({ platform, onBack, onLogout }: ChatStepProps) 
 
   useEffect(() => {
     listEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [history, response]);
+  }, [history, streamingText]);
 
   const handleSend = async () => {
     const text = prompt.trim();
@@ -41,31 +41,91 @@ export default function ChatStep({ platform, onBack, onLogout }: ChatStepProps) 
 
     setSending(true);
     setError(null);
-    setResponse(null);
+    setStreamingText('');
     setHistory(h => [...h, { role: 'user', text }]);
     setPrompt('');
 
+    const controller = new AbortController();
+    abortRef.current = controller;
+    let accumulatedText = '';
+
     try {
-      const res = await fetch(`/api/${platform}/chat`, {
+      const res = await fetch(`/api/${platform}/chat?stream=true`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: text, timeout: 180000 }),
+        body: JSON.stringify({ prompt: text, timeout: 180000, stream: true }),
+        signal: controller.signal,
       });
-      const data = await res.json();
+
       if (!res.ok) {
-        setError(data.error || '请求失败');
+        const errData = await res.json().catch(() => ({ error: '请求失败' }));
+        setError(errData.error || `HTTP ${res.status}`);
         setHistory(h => h.slice(0, -1));
-      } else {
-        setResponse(data.text);
-        setComplete(data.complete ?? true);
-        setHistory(h => [...h, { role: 'ai', text: data.text }]);
+        setSending(false);
+        return;
       }
+
+      const reader = res.body?.getReader();
+      if (!reader) {
+        setError('无法读取响应流');
+        setHistory(h => h.slice(0, -1));
+        setSending(false);
+        return;
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.error) {
+                setError(data.error);
+              } else if (data.complete) {
+                accumulatedText = data.text || accumulatedText;
+                setStreamingText(accumulatedText);
+              } else if (data.text) {
+                accumulatedText = data.text;
+                setStreamingText(accumulatedText);
+              }
+            } catch { /* skip malformed */ }
+          }
+        }
+      }
+
+      // 处理 buffer 中剩余数据
+      if (buffer.startsWith('data: ')) {
+        try {
+          const data = JSON.parse(buffer.slice(6));
+          if (data.complete || data.text) {
+            accumulatedText = data.text || accumulatedText;
+          }
+        } catch { /* skip */ }
+      }
+
+      // 添加到历史
+      if (accumulatedText) {
+        setHistory(h => [...h, { role: 'ai', text: accumulatedText }]);
+      }
+      setStreamingText('');
     } catch (err: unknown) {
+      if ((err as Error)?.name === 'AbortError') return;
       const msg = err instanceof Error ? err.message : '网络错误';
       setError(msg);
       setHistory(h => h.slice(0, -1));
     } finally {
       setSending(false);
+      setStreamingText('');
+      abortRef.current = null;
     }
   };
 
@@ -131,8 +191,10 @@ export default function ChatStep({ platform, onBack, onLogout }: ChatStepProps) 
               borderRadius: 'var(--radius-lg) var(--radius-lg) var(--radius-lg) 4px',
               background: 'var(--bg-card)', color: 'var(--text-primary)',
               boxShadow: 'var(--shadow-card)',
+              fontSize: 'var(--fs-body)', lineHeight: 1.6,
+              whiteSpace: 'pre-wrap', wordBreak: 'break-word',
             }}>
-              <DotLoading color="primary" />
+              {streamingText || <DotLoading color="primary" />}
             </div>
           </div>
         )}
