@@ -5,7 +5,7 @@
  * 使用通用选择器适配。
  */
 import { BaseChatPlatform } from '../base.js';
-import { locateElement, locateAllElements, isElementVisible } from '../../platform/utils/dom.js';
+import { locateElement, isElementVisible } from '../../platform/utils/dom.js';
 import { zhipuSelectors, zhipuTiming, ZHIPU_URL } from './config.js';
 
 export class ZhipuChatPlatform extends BaseChatPlatform {
@@ -67,28 +67,6 @@ export class ZhipuChatPlatform extends BaseChatPlatform {
         console.error('[zhipu] 已开启联网搜索');
       }
     } catch { /* ignore */ }
-  }
-
-  async _getCitedSources() {
-    if (!this.page || !this.selectors.citedSources) return '';
-    try {
-      const sources = await locateAllElements(this.page, this.selectors.citedSources);
-      if (!sources || sources.length === 0) return '';
-
-      const lines = [];
-      for (const el of sources) {
-        const text = await el.innerText().catch(() => '');
-        const href = await el.getAttribute('href').catch(() => '');
-        if (text.trim()) {
-          lines.push(href ? `${text} (${href})` : text);
-        }
-      }
-      if (lines.length > 0) {
-        console.error(`[zhipu] 提取到 ${lines.length} 条引用信源`);
-        return `\n\n【引用信源】\n${lines.join('\n')}`;
-      }
-    } catch { /* ignore */ }
-    return '';
   }
 
   async sendPrompt(prompt) {
@@ -166,56 +144,73 @@ export class ZhipuChatPlatform extends BaseChatPlatform {
   }
 
   /**
-   * 提取 AI 回复区域的内容 + 引用信源。
-   * DOM 结构：
-   *   .answer-content-wrap:not(.text-advance-thinking-content) → markdown 渲染 HTML
-   *   .sources-tab-container.sources-tab-text-container → 引用信源列表
+   * 提取 AI 回复区域的内容 + 引用信源，将 citation 转换为超链接。
    */
   async _getResponseText() {
     if (!this.page) return '';
-    let html = '';
 
-    // 1. 取 aiResponse 内容
-    const contentSelectors = [
-      '.answer:last-of-type > .panel > .flex > .answer-content.flex1 > .code-box.flex1 > .answer-content-wrap:not(.text-advance-thinking-content)',
+    // 在页面中克隆 DOM，将 .source-item-num[data-url] 转换为 <a> 链接，返回 HTML
+    const result = await this.page.evaluate(() => {
+      // 1. 取答案内容
+      const answerEl = document.querySelector(
+        '.answer:last-of-type .answer-content-wrap:not(.text-advance-thinking-content)'
+      ) || document.querySelector('.answer:last-of-type .markdown-body');
+      if (!answerEl) return null;
+
+      const clone = answerEl.cloneNode(true);
+      // 转换引用标记为可点击链接
+      clone.querySelectorAll('.source-item-num[data-url]').forEach(span => {
+        const url = span.getAttribute('data-url');
+        if (!url) return;
+        const a = document.createElement('a');
+        a.href = url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.textContent = span.textContent || url;
+        a.style.textDecoration = 'underline';
+        span.parentNode.replaceChild(a, span);
+      });
+
+      const contentHtml = clone.innerHTML;
+
+      // 2. 取引用信源
+      const sourcesEl = document.querySelector('.sources-tab-container.sources-tab-text-container');
+      const sourcesHtml = sourcesEl ? sourcesEl.innerHTML : '';
+
+      const container = document.createElement('div');
+      const contentDiv = document.createElement('div');
+      contentDiv.className = 'ai-answer-content';
+      contentDiv.innerHTML = contentHtml;
+      container.appendChild(contentDiv);
+
+      if (sourcesHtml) {
+        const sourcesDiv = document.createElement('div');
+        sourcesDiv.className = 'ai-sources';
+        sourcesDiv.innerHTML = sourcesHtml;
+        container.appendChild(sourcesDiv);
+      }
+
+      return container.outerHTML;
+    });
+
+    if (result && result.length > 100) return `__HTML__${result}`;
+
+    // fallback: 原生 Playwright 选择器
+    let html = '';
+    const selectors = [
       '.answer:last-of-type .answer-content-wrap:not(.text-advance-thinking-content)',
+      '.answer:last-of-type .markdown-body',
     ];
-    for (const sel of contentSelectors) {
+    for (const sel of selectors) {
       try {
         const el = this.page.locator(sel).last();
-        const count = await el.count().catch(() => 0);
-        if (count > 0) {
+        if (await el.count().then(c => c > 0).catch(() => false)) {
           const inner = await el.innerHTML({ timeout: 2000 }).catch(() => '');
-          if (inner && inner.trim().length > 100) { html = inner; break; }
+          if (inner && inner.trim().length > 50) { html = inner; break; }
         }
       } catch { /* try next */ }
     }
-
-    if (!html) {
-      // fallback: 直接取 markdown-body
-      try {
-        const el = this.page.locator('.answer:last-of-type .markdown-body').last();
-        const inner = await el.innerHTML({ timeout: 2000 }).catch(() => '');
-        if (inner && inner.trim().length > 0) html = inner;
-      } catch { /* ignore */ }
-    }
-
     if (!html) return '';
-
-    // 2. 取引用信源（如果有）
-    let sourcesHtml = '';
-    try {
-      const sourcesEl = this.page.locator('.sources-tab-container.sources-tab-text-container').last();
-      const count = await sourcesEl.count().catch(() => 0);
-      if (count > 0) {
-        sourcesHtml = await sourcesEl.innerHTML({ timeout: 2000 }).catch(() => '');
-      }
-    } catch { /* ignore */ }
-
-    const result = sourcesHtml
-      ? `<div class="ai-answer-content">${html}</div><div class="ai-sources">${sourcesHtml}</div>`
-      : `<div class="ai-answer-content">${html}</div>`;
-
-    return `__HTML__${result}`;
+    return `__HTML__<div class="ai-answer-content">${html}</div>`;
   }
 }
